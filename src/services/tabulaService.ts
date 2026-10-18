@@ -106,6 +106,10 @@ export class TabulaService {
       headerLine.includes("other party") ||
       headerLine.includes("transaction type");
 
+    // Tabula emits a wrapped Details cell as a separate row with no receipt or
+    // completion time. Track the open transaction so those rows can be joined.
+    let activeTransaction: Transaction | null = null;
+
     for (let i = headerIndex + 1; i < lines.length; i++) {
       const line = lines[i];
 
@@ -118,10 +122,25 @@ export class TabulaService {
       const normalize = (value: string | undefined) =>
         (value || "").trim().replace(/[\r\n]+/g, " ").replace(/\s+/g, " ");
 
+      const receiptNo = normalize(fields[0]);
+      const completionTime = normalize(fields[1]);
+      const details = normalize(fields[2]);
+
+      // Wrapped Details lines have no receipt or time; append them to the
+      // transaction they belong to.
+      if (!receiptNo && !completionTime) {
+        if (activeTransaction && details) {
+          activeTransaction.details = normalize(
+            `${activeTransaction.details} ${details}`,
+          );
+        }
+        continue;
+      }
+
       const transaction: Transaction = {
-        receiptNo: normalize(fields[0]),
-        completionTime: normalize(fields[1]),
-        details: normalize(fields[2]),
+        receiptNo,
+        completionTime,
+        details,
         transactionStatus: normalize(fields[3]) || "Unknown",
         paidIn: this.parseAmount(fields[4]),
         withdrawn: this.parseAmount(fields[5]),
@@ -137,11 +156,8 @@ export class TabulaService {
         transaction.otherParty = otherParty;
       }
 
-      if (!transaction.receiptNo && !transaction.completionTime) {
-        continue;
-      }
-
       transactions.push(transaction);
+      activeTransaction = transaction;
     }
 
     const sortedTransactions = transactions.sort((a, b) => {
